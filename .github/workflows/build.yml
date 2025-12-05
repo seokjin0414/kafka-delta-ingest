@@ -10,30 +10,24 @@ jobs:
   format:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Install minimum stable with clippy and rustfmt
-      uses: actions-rs/toolchain@v1
+    - uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
       with:
-        profile: default
-        toolchain: stable
-        override: true
+        components: rustfmt
     - name: Format
       run: cargo fmt -- --check
 
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Install minimum stable with clippy and rustfmt
-      uses: actions-rs/toolchain@v1
+    - uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
       with:
-        profile: default
-        toolchain: stable
-        override: true
-    - name: Build and lint for S3
-      run: cargo clippy --features s3
-    - name: Build and lint for Azure
-      run: cargo clippy --features azure
+        components: clippy
+    - name: Build and lint
+      run: cargo clippy -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -44,17 +38,10 @@ jobs:
       # and hopefully avoid final link "No space left on device"
       CARGO_INCREMENTAL: 0
     steps:
-    - uses: actions/checkout@v2
-    - name: Install minimum stable with clippy and rustfmt
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: default
-        toolchain: stable
-        override: true
+    - uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
     - name: Teststack setup
       run: docker compose up setup
-    - name: Run s3 feature tests
-      run: cargo test --features s3
-    - name: Run azure feature tests
-      run: cargo test --features azure
-
+    - name: Run tests
+      run: cargo test
