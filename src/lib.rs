@@ -6,6 +6,7 @@
 
 #![deny(warnings)]
 #![deny(missing_docs)]
+#![allow(clippy::result_large_err)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -799,11 +800,7 @@ impl IngestProcessor {
     fn consume_timeout_duration(&self) -> Duration {
         let elapsed_secs = self.latency_timer.elapsed().as_secs();
 
-        let timeout_secs = if elapsed_secs >= self.opts.allowed_latency {
-            0
-        } else {
-            self.opts.allowed_latency - elapsed_secs
-        };
+        let timeout_secs = self.opts.allowed_latency.saturating_sub(elapsed_secs);
 
         Duration::from_secs(timeout_secs)
     }
@@ -1238,13 +1235,10 @@ impl PartitionAssignment {
     /// Returns a copy of the current partition offsets as a [`HashMap`] for all partitions that have an offset stored in memory.
     /// Partitions that do not have an offset stored in memory (offset is [`None`]) are **not** included in the returned HashMap.
     fn nonempty_partition_offsets(&self) -> HashMap<DataTypePartition, DataTypeOffset> {
-        let partition_offsets = self
-            .assignment
+        self.assignment
             .iter()
             .filter_map(|(k, v)| v.as_ref().map(|o| (*k, *o)))
-            .collect();
-
-        partition_offsets
+            .collect()
     }
 }
 
