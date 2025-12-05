@@ -1204,11 +1204,21 @@ impl IngestProcessor {
     }
 
     /// Refreshes the transaction version cache for the given partitions.
-    /// Fetches versions from delta log store (network I/O).
+    /// Fetches versions from delta log store in parallel to minimize network I/O latency.
     async fn refresh_txn_version_cache(&mut self, partitions: &[DataTypePartition]) {
-        for partition in partitions {
-            let txn_app_id = txn_app_id_for_partition(self.opts.app_id.as_str(), *partition);
-            let version = last_txn_version(&self.table, &txn_app_id).await;
+        let futures: Vec<_> = partitions
+            .iter()
+            .map(|partition| {
+                let txn_app_id = txn_app_id_for_partition(self.opts.app_id.as_str(), *partition);
+                let table = &self.table;
+                async move {
+                    let version = last_txn_version(table, &txn_app_id).await;
+                    (txn_app_id, version)
+                }
+            })
+            .collect();
+
+        for (txn_app_id, version) in futures::future::join_all(futures).await {
             self.txn_version_cache.insert(txn_app_id, version);
         }
     }
