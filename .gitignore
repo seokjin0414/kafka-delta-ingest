@@ -4,3 +4,8 @@
 tests/json/*.json
 
 .idea
+
+.claude
+
+# Local cargo config (macOS OpenSSL paths)
+.cargo/config.toml
