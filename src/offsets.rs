@@ -7,6 +7,7 @@ use deltalake_core::protocol::DeltaOperation;
 use deltalake_core::protocol::OutputMode;
 use deltalake_core::{DeltaTable, DeltaTableError};
 use log::{error, info};
+use std::collections::HashMap;
 
 /// Errors returned by `write_offsets_to_delta` function.
 #[derive(thiserror::Error, Debug)]
@@ -51,7 +52,10 @@ pub(crate) async fn write_offsets_to_delta(
         .map(|(p, o)| (txn_app_id_for_partition(app_id, *p), *o))
         .collect();
 
-    if is_safe_to_commit_transactions(table, &mapped_offsets).await {
+    // Build cache of transaction versions (single batch of network I/O)
+    let txn_version_cache = build_txn_version_cache(table, &mapped_offsets).await;
+
+    if is_safe_to_commit_transactions(&txn_version_cache, &mapped_offsets) {
         // table has no stored offsets for given app_id/partitions so it is safe to write txn actions
         commit_partition_offsets(table, mapped_offsets, &offsets_as_str, app_id.to_owned()).await?;
         Ok(())
@@ -61,7 +65,7 @@ pub(crate) async fn write_offsets_to_delta(
         let mut conflict_offsets = Vec::new();
 
         for (txn_app_id, offset) in mapped_offsets {
-            if let Some(stored_offset) = last_txn_version(table, &txn_app_id).await {
+            if let Some(stored_offset) = txn_version_cache.get(&txn_app_id).copied().flatten() {
                 if stored_offset < offset {
                     conflict_offsets.push((txn_app_id, stored_offset, offset));
                 }
@@ -149,22 +153,34 @@ async fn commit_partition_offsets(
     }
 }
 
-async fn is_safe_to_commit_transactions(
+/// Build a cache of transaction versions for all txn_app_ids.
+/// This fetches all versions in a single pass to avoid repeated network I/O.
+async fn build_txn_version_cache(
     table: &DeltaTable,
     offsets: &[(String, DataTypeOffset)],
-) -> bool {
-    for (id, _) in offsets {
-        if last_txn_version(table, id).await.is_some() {
-            return false;
-        }
+) -> HashMap<String, Option<i64>> {
+    let mut cache = HashMap::new();
+    for (txn_app_id, _) in offsets {
+        let version = last_txn_version(table, txn_app_id).await;
+        cache.insert(txn_app_id.clone(), version);
     }
-    true
+    cache
+}
+
+fn is_safe_to_commit_transactions(
+    cache: &HashMap<String, Option<i64>>,
+    offsets: &[(String, DataTypeOffset)],
+) -> bool {
+    offsets
+        .iter()
+        .all(|(id, _)| cache.get(id).copied().flatten().is_none())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+    use url::Url;
     use uuid::Uuid;
 
     const VERSION_0: &str = r#"{"commitInfo":{"timestamp":1564524295023,"operation":"CREATE TABLE","operationParameters":{"isManaged":"false","description":null,"partitionBy":"[]","properties":"{}"},"isBlindAppend":true}}
@@ -222,6 +238,7 @@ mod tests {
         let v0_path = format!("{}/_delta_log/00000000000000000000.json", &table_path);
         std::fs::create_dir_all(Path::new(&v0_path).parent().unwrap()).unwrap();
         std::fs::write(&v0_path, VERSION_0).unwrap();
-        deltalake_core::open_table(&table_path).await.unwrap()
+        let url = Url::from_file_path(std::fs::canonicalize(&table_path).unwrap()).unwrap();
+        deltalake_core::open_table(url).await.unwrap()
     }
 }
