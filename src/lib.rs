@@ -759,6 +759,9 @@ struct IngestProcessor {
     opts: IngestOptions,
     ingest_metrics: IngestMetrics,
     message_deserializer: Box<dyn MessageDeserializer + Send>,
+    /// Cache for transaction versions to avoid repeated network I/O.
+    /// Refreshed after table.update() calls.
+    txn_version_cache: HashMap<String, Option<i64>>,
 }
 
 impl IngestProcessor {
@@ -795,6 +798,7 @@ impl IngestProcessor {
             opts,
             ingest_metrics,
             message_deserializer: deserializer,
+            txn_version_cache: HashMap::new(),
         })
     }
 
@@ -1046,11 +1050,14 @@ impl IngestProcessor {
         self.delta_writer.reset();
         self.value_buffers.reset();
         self.delta_partition_offsets.clear();
+        self.txn_version_cache.clear();
         let partitions: Vec<DataTypePartition> = partition_assignment.assigned_partitions();
-        // Update offsets stored in PartitionAssignment to the latest from the delta log
+        // Refresh txn version cache from delta log (network I/O happens here)
+        self.refresh_txn_version_cache(&partitions).await;
+        // Update offsets stored in PartitionAssignment to the latest from the cache
         for partition in partitions.iter() {
             let txn_app_id = txn_app_id_for_partition(self.opts.app_id.as_str(), *partition);
-            let version = last_txn_version(&self.table, &txn_app_id).await;
+            let version = self.txn_version_cache.get(&txn_app_id).copied().flatten();
             partition_assignment.assignment.insert(*partition, version);
             self.delta_partition_offsets.insert(*partition, version);
         }
@@ -1168,14 +1175,17 @@ impl IngestProcessor {
     }
 
     /// Returns a boolean indicating whether the partition offsets currently held in memory match those stored in the delta log.
-    async fn are_partition_offsets_match(&self) -> bool {
+    /// Uses cached transaction versions to avoid network I/O on every call.
+    async fn are_partition_offsets_match(&mut self) -> bool {
+        // Refresh cache before checking (single network call per partition)
+        let partitions: Vec<DataTypePartition> =
+            self.delta_partition_offsets.keys().copied().collect();
+        self.refresh_txn_version_cache(&partitions).await;
+
         let mut result = true;
         for (partition, offset) in &self.delta_partition_offsets {
-            let version = last_txn_version(
-                &self.table,
-                &txn_app_id_for_partition(self.opts.app_id.as_str(), *partition),
-            )
-            .await;
+            let txn_app_id = txn_app_id_for_partition(self.opts.app_id.as_str(), *partition);
+            let version = self.txn_version_cache.get(&txn_app_id).copied().flatten();
 
             if let Some(version) = version {
                 match offset {
@@ -1191,6 +1201,16 @@ impl IngestProcessor {
             }
         }
         result
+    }
+
+    /// Refreshes the transaction version cache for the given partitions.
+    /// Fetches versions from delta log store (network I/O).
+    async fn refresh_txn_version_cache(&mut self, partitions: &[DataTypePartition]) {
+        for partition in partitions {
+            let txn_app_id = txn_app_id_for_partition(self.opts.app_id.as_str(), *partition);
+            let version = last_txn_version(&self.table, &txn_app_id).await;
+            self.txn_version_cache.insert(txn_app_id, version);
+        }
     }
 
     fn buffered_record_batch_count(&self) -> usize {

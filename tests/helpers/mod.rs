@@ -16,7 +16,7 @@ pub fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
 
 use bytes::Buf;
 use chrono::prelude::*;
-use deltalake_core::kernel::{Action, Add, Metadata, Protocol, Remove, Transaction};
+use deltalake_core::kernel::{Action, Add, Remove, Transaction};
 use deltalake_core::logstore::ObjectStoreRef;
 use deltalake_core::parquet::{
     file::reader::{FileReader, SerializedFileReader},
@@ -34,6 +34,7 @@ use serde_json::{Value, json};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use url::Url;
 use uuid::Uuid;
 
 /*
@@ -120,11 +121,12 @@ pub async fn send_bytes(producer: &FutureProducer, topic: &str, bytes: &Vec<u8>)
 // TODO Research whether it's possible to read parquet data from bytes but not from file
 pub async fn read_files_from_store(table: &DeltaTable) -> Vec<i32> {
     let s3 = table.object_store().clone();
-    let paths = table.get_files_iter().unwrap();
+    let file_uris: Vec<String> = table.get_file_uris().unwrap().collect();
     let tmp = format!(".test-{}.tmp", Uuid::new_v4());
     let mut list = Vec::new();
 
-    for path in paths {
+    for uri in file_uris {
+        let path = Path::from(uri);
         let get_result = s3.get(&path).await.unwrap();
         let bytes = get_result.bytes().await.unwrap();
         {
@@ -150,7 +152,9 @@ pub async fn read_files_from_store(table: &DeltaTable) -> Vec<i32> {
         }
     }
 
-    std::fs::remove_file(tmp).unwrap();
+    if !list.is_empty() {
+        std::fs::remove_file(tmp).unwrap();
+    }
 
     list.sort();
     list
@@ -412,13 +416,19 @@ pub async fn read_table_content_at_version_as<T: DeserializeOwned>(
 }
 
 pub async fn read_table_content_as_jsons(table_uri: &str) -> Vec<Value> {
-    let table = deltalake_core::open_table(table_uri).await.unwrap();
+    let url = Url::parse(table_uri).unwrap_or_else(|_| {
+        Url::from_file_path(std::fs::canonicalize(table_uri).unwrap()).unwrap()
+    });
+    let table = deltalake_core::open_table(url).await.unwrap();
     let store = table.object_store().clone();
     json_listify_table_content(table, store).await
 }
 
 pub async fn read_table_content_at_version_as_jsons(table_uri: &str, version: i64) -> Vec<Value> {
-    let table = deltalake_core::open_table_with_version(table_uri, version)
+    let url = Url::parse(table_uri).unwrap_or_else(|_| {
+        Url::from_file_path(std::fs::canonicalize(table_uri).unwrap()).unwrap()
+    });
+    let table = deltalake_core::open_table_with_version(url, version)
         .await
         .unwrap();
     let store = table.object_store().clone();
@@ -430,14 +440,10 @@ async fn json_listify_table_content(table: DeltaTable, store: ObjectStoreRef) ->
     let tmp = format!(".test-{}.tmp", Uuid::new_v4());
     let mut list = Vec::new();
     // XXX :confused: why is this reversed in 0.18+
-    for file in table
-        .get_files_iter()
-        .unwrap()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-    {
-        let get_result = store.get(&file).await.unwrap();
+    let file_uris: Vec<String> = table.get_file_uris().unwrap().collect();
+    for uri in file_uris.into_iter().rev() {
+        let path = Path::from(uri);
+        let get_result = store.get(&path).await.unwrap();
         let bytes = get_result.bytes().await.unwrap();
         // lol what is this
         let mut file = File::create(&tmp).unwrap();
@@ -463,14 +469,15 @@ pub fn commit_file_path(table: &str, version: i64) -> String {
 }
 
 pub async fn inspect_table(path: &str) {
-    let table = deltalake_core::open_table(path).await.unwrap();
+    let url = Url::parse(path)
+        .unwrap_or_else(|_| Url::from_file_path(std::fs::canonicalize(path).unwrap()).unwrap());
+    let table = deltalake_core::open_table(url).await.unwrap();
     println!("Inspecting table {}", path);
-    for (k, v) in table.get_app_transaction_version().iter() {
-        println!("  {}: {}", k, v.version);
-    }
+    // Note: get_app_transaction_version() is no longer available in deltalake 0.29
     let store = table.object_store().clone();
+    let table_version = table.version().unwrap_or(0);
 
-    for version in 1..=table.version() {
+    for version in 1..=table_version {
         let log_path = format!("{}/_delta_log/{:020}.json", path, version);
         let get_result = store.get(&Path::parse(&log_path).unwrap()).await.unwrap();
         let bytes = get_result.bytes().await.unwrap();
@@ -485,8 +492,7 @@ pub async fn inspect_table(path: &str) {
                     println!("  Txn: {}: {}", t.app_id, t.version)
                 }
                 Action::Add(a) => {
-                    let stats = a.get_stats_parsed().unwrap().unwrap();
-                    println!("  Add: {}. Records: {}", &a.path, stats.num_records);
+                    println!("  Add: {}", &a.path);
                     let full_path = format!("{}/{}", &path, &a.path);
                     let parquet_bytes = store
                         .get(&Path::parse(&full_path).unwrap())
@@ -506,7 +512,7 @@ pub async fn inspect_table(path: &str) {
     }
     println!();
     println!("Checkpoints:");
-    for version in 1..=table.version() {
+    for version in 1..=table_version {
         if version % 10 == 0 {
             println!("Version: {}", version);
             let log_path = format!("{}/_delta_log/{:020}.checkpoint.parquet", path, version);
@@ -521,14 +527,12 @@ pub async fn inspect_table(path: &str) {
             let mut i = 0;
             for record in reader.get_row_iter(None).unwrap() {
                 let json = record.unwrap().to_json_value();
-                if let Some(m) = parse_json_field::<Metadata>(&json, "metaData") {
-                    println!(" {}. metaData: {}", i, m.id);
+                // Simplified output - fields are now private in deltalake 0.29
+                if json.get("metaData").is_some() {
+                    println!(" {}. metaData", i);
                 }
-                if let Some(p) = parse_json_field::<Protocol>(&json, "protocol") {
-                    println!(
-                        " {}. protocol: minReaderVersion={}, minWriterVersion={}",
-                        i, p.min_reader_version, p.min_writer_version
-                    );
+                if json.get("protocol").is_some() {
+                    println!(" {}. protocol", i);
                 }
                 if let Some(t) = parse_json_field::<Transaction>(&json, "txn") {
                     println!(" {}. txn: appId={}, version={}", i, t.app_id, t.version);
@@ -537,13 +541,7 @@ pub async fn inspect_table(path: &str) {
                     println!(" {}. remove: {}", i, r.path);
                 }
                 if let Some(a) = parse_json_field::<Add>(&json, "add") {
-                    let records = a
-                        .get_stats_parsed()
-                        .ok()
-                        .flatten()
-                        .map(|s| s.num_records)
-                        .unwrap_or(-1);
-                    println!(" {}. add[{}]: {}", i, records, a.path);
+                    println!(" {}. add: {}", i, a.path);
                 }
 
                 i += 1;
@@ -635,17 +633,23 @@ impl TestScope {
     }
 
     pub async fn wait_on_total_offset(&self, apps: Vec<String>, offset: i32) {
-        let mut table = deltalake_core::open_table(&self.table).await.unwrap();
+        let url = Url::parse(&self.table).unwrap_or_else(|_| {
+            Url::from_file_path(std::fs::canonicalize(&self.table).unwrap()).unwrap()
+        });
+        let mut table = deltalake_core::open_table(url).await.unwrap();
         let expected_total = offset - TEST_PARTITIONS;
         loop {
             table.update().await.unwrap();
-            let mut total = 0;
+            let mut total: i64 = 0;
             for key in apps.iter() {
-                total += table
-                    .get_app_transaction_version()
-                    .get(key)
-                    .map(|txn| txn.version)
-                    .unwrap_or(0);
+                if let Ok(snapshot) = table.snapshot() {
+                    if let Ok(Some(version)) = snapshot
+                        .transaction_version(table.log_store().as_ref(), key)
+                        .await
+                    {
+                        total += version;
+                    }
+                }
             }
 
             if total >= expected_total as i64 {
@@ -660,7 +664,10 @@ impl TestScope {
     }
 
     pub async fn validate_data(&self) {
-        let table = deltalake_core::open_table(&self.table).await.unwrap();
+        let url = Url::parse(&self.table).unwrap_or_else(|_| {
+            Url::from_file_path(std::fs::canonicalize(&self.table).unwrap()).unwrap()
+        });
+        let table = deltalake_core::open_table(url).await.unwrap();
         let result = read_files_from_store(&table).await;
         let r: Vec<i32> = (0..TEST_TOTAL_MESSAGES).collect();
         println!("Got messages {}/{}", result.len(), TEST_TOTAL_MESSAGES);
