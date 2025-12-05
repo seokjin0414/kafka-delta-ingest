@@ -16,7 +16,7 @@ use deltalake_core::parquet::{
     record::RowAccessor,
 };
 use deltalake_core::{DeltaTable, Path};
-use kafka_delta_ingest::{start_ingest, IngestOptions};
+use miridih_de_kafka_delta_ingest::{start_ingest, IngestOptions};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::DefaultClientContext;
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -214,10 +214,7 @@ pub async fn create_and_run_kdi(
 ) {
     init_logger();
 
-    #[cfg(feature = "s3")]
     deltalake_aws::register_handlers(None);
-    #[cfg(feature = "azure")]
-    deltalake_azure::register_handlers(None);
     let topic = format!("{}-{}", app_id, Uuid::new_v4());
     let table = create_local_table(schema, delta_partitions, &topic);
     create_topic(&topic, kafka_num_partitions).await;

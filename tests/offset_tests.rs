@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use std::path::Path;
 
-use kafka_delta_ingest::{AutoOffsetReset, IngestOptions};
+use miridih_de_kafka_delta_ingest::{AutoOffsetReset, IngestOptions};
 #[allow(dead_code)]
 mod helpers;
 

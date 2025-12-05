@@ -32,11 +32,11 @@
 
 use chrono::Local;
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
-use kafka_delta_ingest::{
+use log::{error, info, LevelFilter};
+use miridih_de_kafka_delta_ingest::{
     start_ingest, AutoOffsetReset, DataTypeOffset, DataTypePartition, IngestOptions, MessageFormat,
     SchemaSource,
 };
-use log::{error, info, LevelFilter};
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::path::PathBuf;
@@ -46,8 +46,6 @@ use std::str::FromStr;
 async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "s3")]
     deltalake_aws::register_handlers(None);
-    #[cfg(feature = "azure")]
-    deltalake_azure::register_handlers(None);
 
     #[cfg(feature = "sentry-ext")]
     {
@@ -512,7 +510,7 @@ fn convert_matches_to_message_format(
 #[cfg(test)]
 mod test {
     use clap::ArgMatches;
-    use kafka_delta_ingest::{MessageFormat, SchemaSource};
+    use miridih_de_kafka_delta_ingest::{MessageFormat, SchemaSource};
 
     use crate::{
         build_app, convert_matches_to_message_format, parse_seek_offsets, SchemaSourceError,

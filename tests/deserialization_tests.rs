@@ -1,8 +1,8 @@
 #[allow(dead_code)]
 mod helpers;
 
-use kafka_delta_ingest::{IngestOptions, MessageFormat, SchemaSource};
 use log::info;
+use miridih_de_kafka_delta_ingest::{IngestOptions, MessageFormat, SchemaSource};
 use schema_registry_converter::{
     async_impl::{
         easy_avro::EasyAvroEncoder,

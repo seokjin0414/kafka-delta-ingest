@@ -12,7 +12,7 @@ use std::time::Duration;
 use serial_test::serial;
 use uuid::Uuid;
 
-use kafka_delta_ingest::IngestOptions;
+use miridih_de_kafka_delta_ingest::IngestOptions;
 use rusoto_core::Region;
 use rusoto_s3::{CopyObjectRequest, PutObjectRequest, S3};
 

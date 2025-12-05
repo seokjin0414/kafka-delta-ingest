@@ -1,5 +1,5 @@
-use kafka_delta_ingest::IngestOptions;
 use log::info;
+use miridih_de_kafka_delta_ingest::IngestOptions;
 use serde::{Deserialize, Serialize};
 
 use serde_json::json;

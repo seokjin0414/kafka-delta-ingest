@@ -6,7 +6,7 @@ use deltalake_core::kernel::transaction::TableReference;
 use deltalake_core::kernel::{Action, Add};
 use deltalake_core::protocol::{DeltaOperation, SaveMode};
 use deltalake_core::DeltaTableError;
-use kafka_delta_ingest::writer::*;
+use miridih_de_kafka_delta_ingest::writer::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;

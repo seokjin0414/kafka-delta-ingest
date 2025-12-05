@@ -7,7 +7,7 @@ use serde_json::json;
 use serial_test::serial;
 use tokio::time::{sleep, Duration};
 
-use kafka_delta_ingest::IngestOptions;
+use miridih_de_kafka_delta_ingest::IngestOptions;
 
 #[tokio::test]
 #[serial]
