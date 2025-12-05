@@ -8,8 +8,17 @@ pub(crate) async fn load_table(
     table_uri: &str,
     options: HashMap<String, String>,
 ) -> Result<DeltaTable, DeltaTableError> {
-    let url =
-        Url::parse(table_uri).map_err(|e| DeltaTableError::InvalidTableLocation(e.to_string()))?;
+    let url = Url::parse(table_uri).unwrap_or_else(|_| {
+        // Handle local file paths by converting to file:// URL
+        let path = std::path::Path::new(table_uri);
+        let abs_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        };
+        Url::from_file_path(&abs_path)
+            .unwrap_or_else(|_| Url::parse(&format!("file://{}", abs_path.display())).unwrap())
+    });
     let mut table = deltalake_core::open_table_with_storage_options(url, options).await?;
     table.load().await?;
     Ok(table)

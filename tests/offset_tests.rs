@@ -5,11 +5,16 @@ use rdkafka::{producer::Producer, util::Timeout};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serial_test::serial;
+use url::Url;
 use uuid::Uuid;
 
 use std::path::Path;
 
 use miridih_de_kafka_delta_ingest::{AutoOffsetReset, IngestOptions};
+
+fn path_to_url(path: &str) -> Url {
+    Url::from_file_path(std::fs::canonicalize(path).unwrap()).unwrap()
+}
 #[allow(dead_code)]
 mod helpers;
 
@@ -50,9 +55,11 @@ async fn zero_offset_issue() {
 
     {
         // check that there's only 1 record in table
-        let table = deltalake_core::open_table(table).await.unwrap();
-        assert_eq!(table.version(), 1);
-        assert_eq!(count_records(table), 1);
+        let t = deltalake_core::open_table(path_to_url(table))
+            .await
+            .unwrap();
+        assert_eq!(t.version(), Some(1));
+        assert_eq!(count_records(t), 1);
     }
 
     let producer = helpers::create_producer();
@@ -78,29 +85,41 @@ async fn zero_offset_issue() {
     rt.shutdown_background();
 
     // check that there's only 3 records
-    let table = deltalake_core::open_table(table).await.unwrap();
-    assert_eq!(table.version(), 3);
-    assert_eq!(count_records(table), 3);
+    let t = deltalake_core::open_table(path_to_url(table))
+        .await
+        .unwrap();
+    assert_eq!(t.version(), Some(3));
+    assert_eq!(count_records(t), 3);
 
     //cleanup
     std::fs::remove_file(v2).unwrap();
     std::fs::remove_file(v3).unwrap();
 }
 
-fn count_records(table: DeltaTable) -> i64 {
+async fn count_records_async(table: &DeltaTable) -> i64 {
+    use futures::StreamExt;
+
     let mut count = 0;
 
-    if let Ok(adds) = table.state.unwrap().file_actions() {
-        for add in adds.iter() {
-            if let Some(stats) = add.stats.as_ref() {
-                // as of deltalake-core 0.18.0 get_stats_parsed() only returns data when loaded
-                // from checkpoints so manual parsing is necessary
-                let stats: Stats = serde_json::from_str(stats).unwrap_or(Stats::default());
-                count += stats.num_records;
+    if let Some(state) = table.state.as_ref() {
+        let snapshot = state.snapshot();
+        let mut file_views = snapshot.file_views(table.log_store().as_ref(), None);
+        while let Some(file_view) = file_views.next().await {
+            if let Ok(add) = file_view {
+                if let Some(stats) = add.stats().as_ref() {
+                    // as of deltalake-core 0.18.0 get_stats_parsed() only returns data when loaded
+                    // from checkpoints so manual parsing is necessary
+                    let stats: Stats = serde_json::from_str(stats).unwrap_or(Stats::default());
+                    count += stats.num_records;
+                }
             }
         }
     }
     count
+}
+
+fn count_records(table: DeltaTable) -> i64 {
+    tokio::runtime::Handle::current().block_on(count_records_async(&table))
 }
 
 #[tokio::test]
@@ -382,9 +401,11 @@ async fn end_at_initial_offsets() {
 
     {
         // check that there's 3 records in table
-        let table = deltalake_core::open_table(table).await.unwrap();
-        assert_eq!(table.version(), 1);
-        assert_eq!(count_records(table), 15);
+        let t = deltalake_core::open_table(path_to_url(table))
+            .await
+            .unwrap();
+        assert_eq!(t.version(), Some(1));
+        assert_eq!(count_records(t), 15);
     }
 
     // messages in kafka
@@ -401,7 +422,9 @@ async fn end_at_initial_offsets() {
     rt.shutdown_background();
 
     // check that there's only 3 records
-    let table = deltalake_core::open_table(table).await.unwrap();
-    assert_eq!(table.version(), 1);
-    assert_eq!(count_records(table), 15);
+    let t = deltalake_core::open_table(path_to_url(table))
+        .await
+        .unwrap();
+    assert_eq!(t.version(), Some(1));
+    assert_eq!(count_records(t), 15);
 }
