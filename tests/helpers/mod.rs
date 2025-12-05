@@ -441,8 +441,14 @@ async fn json_listify_table_content(table: DeltaTable, store: ObjectStoreRef) ->
     let mut list = Vec::new();
     // XXX :confused: why is this reversed in 0.18+
     let file_uris: Vec<String> = table.get_file_uris().unwrap().collect();
+    let table_uri = table.table_uri();
     for uri in file_uris.into_iter().rev() {
-        let path = Path::from(uri);
+        // Strip the table URI prefix to get relative path for object store
+        let relative_path = uri
+            .strip_prefix(&table_uri)
+            .map(|p| p.trim_start_matches('/'))
+            .unwrap_or(&uri);
+        let path = Path::from(relative_path);
         let get_result = store.get(&path).await.unwrap();
         let bytes = get_result.bytes().await.unwrap();
         // lol what is this

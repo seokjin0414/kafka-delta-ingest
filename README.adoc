@@ -133,6 +133,3 @@ The table below indicates what will happen with respect to the provided argument
 
 For more information, see link:https://github.com/delta-io/delta-rs/tree/dbc2994c5fddfd39fc31a8f9202df74788f59a01/dynamodb_lock[DynamoDB lock].
 
-== Get Involved
-
-For questions or support, please mention `@dxdev.dp.dae` on Slack or contact sjshin@miridih.com.
