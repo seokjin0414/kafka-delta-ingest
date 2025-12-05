@@ -30,7 +30,7 @@ use deltalake_core::{
     protocol::{ColumnCountStat, ColumnValueStat, Stats},
 };
 use deltalake_core::{kernel::transaction::TableReference, parquet::format::FileMetaData};
-use log::{error, info, warn};
+use log::{info, warn};
 use serde_json::{Number, Value};
 use std::collections::HashMap;
 use std::convert::TryFrom;

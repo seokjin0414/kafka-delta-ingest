@@ -29,7 +29,6 @@ strum = "0.27.2"
 strum_macros = "0.27.2"
 thiserror = "2.0.17"
 tokio = { version = "1.48.0", features = ["full"] }
-tokio-stream = { version = "0.1.17", features = ["fs"] }
 tokio-util = "0.7.17"
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
 url = "2.5.7"
@@ -57,10 +56,10 @@ s3 = [
 rusoto_core = { version = "0.48.0", default-features = false, features = ["rustls"]}
 rusoto_credential = { version = "0.48.0"}
 rusoto_s3 = { version = "0.48.0", default-features = false, features = ["rustls"]}
-serial_test = "*"
-tempfile = "3"
-time = "0.3.20"
-utime = "0.3"
+serial_test = "3.2.0"
+tempfile = "3.23.0"
+time = "0.3.44"
+utime = "0.3.3"
 
 [profile.release]
 lto = true

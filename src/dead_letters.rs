@@ -6,7 +6,7 @@ use core::fmt::Debug;
 use deltalake_core::parquet::errors::ParquetError;
 use deltalake_core::{DeltaTable, DeltaTableError};
 use dynamodb_lock::dynamo_lock_options;
-use log::{error, info, warn};
+use log::{info, warn};
 use maplit::hashmap;
 use rdkafka::message::BorrowedMessage;
 use serde::{Deserialize, Serialize};
