@@ -51,7 +51,7 @@ pub(crate) async fn write_offsets_to_delta(
         .map(|(p, o)| (txn_app_id_for_partition(app_id, *p), *o))
         .collect();
 
-    if is_safe_to_commit_transactions(table, &mapped_offsets) {
+    if is_safe_to_commit_transactions(table, &mapped_offsets).await {
         // table has no stored offsets for given app_id/partitions so it is safe to write txn actions
         commit_partition_offsets(table, mapped_offsets, &offsets_as_str, app_id.to_owned()).await?;
         Ok(())
@@ -61,11 +61,10 @@ pub(crate) async fn write_offsets_to_delta(
         let mut conflict_offsets = Vec::new();
 
         for (txn_app_id, offset) in mapped_offsets {
-            match table.get_app_transaction_version().get(&txn_app_id) {
-                Some(stored_offset) if stored_offset.version < offset => {
-                    conflict_offsets.push((txn_app_id, stored_offset.version, offset));
+            if let Some(stored_offset) = last_txn_version(table, &txn_app_id).await {
+                if stored_offset < offset {
+                    conflict_offsets.push((txn_app_id, stored_offset, offset));
                 }
-                _ => (),
             }
         }
 
@@ -150,13 +149,16 @@ async fn commit_partition_offsets(
     }
 }
 
-fn is_safe_to_commit_transactions(
+async fn is_safe_to_commit_transactions(
     table: &DeltaTable,
     offsets: &[(String, DataTypeOffset)],
 ) -> bool {
-    offsets
-        .iter()
-        .all(|(id, _)| !table.get_app_transaction_version().contains_key(id))
+    for (id, _) in offsets {
+        if last_txn_version(table, id).await.is_some() {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -179,30 +181,16 @@ mod tests {
         let offsets = vec![(0, 5), (1, 10)];
 
         // Test successful write
-        assert_eq!(table.version(), 0);
+        assert_eq!(table.version(), Some(0));
         write_offsets_to_delta(&mut table, "test", &offsets)
             .await
             .unwrap();
 
         // verify that txn action is written
         table.update().await.unwrap();
-        assert_eq!(table.version(), 1);
-        assert_eq!(
-            table
-                .get_app_transaction_version()
-                .get("test-0")
-                .unwrap()
-                .version,
-            5
-        );
-        assert_eq!(
-            table
-                .get_app_transaction_version()
-                .get("test-1")
-                .unwrap()
-                .version,
-            10
-        );
+        assert_eq!(table.version(), Some(1));
+        assert_eq!(last_txn_version(&table, "test-0").await.unwrap(), 5);
+        assert_eq!(last_txn_version(&table, "test-1").await.unwrap(), 10);
 
         // Test ignored write
         write_offsets_to_delta(&mut table, "test", &offsets)
@@ -211,7 +199,7 @@ mod tests {
 
         // verify that txn action is not written
         table.update().await.unwrap();
-        assert_eq!(table.version(), 1);
+        assert_eq!(table.version(), Some(1));
 
         // Test failed write (lower stored offsets)
         let offsets = vec![(0, 15)];

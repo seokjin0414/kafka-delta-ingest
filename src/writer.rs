@@ -12,6 +12,7 @@ use deltalake_core::arrow::{
     json::reader::ReaderBuilder,
     record_batch::*,
 };
+use deltalake_core::kernel::engine::arrow_conversion::TryIntoArrow;
 use deltalake_core::kernel::transaction::CommitBuilder;
 use deltalake_core::parquet::{
     arrow::ArrowWriter,
@@ -25,7 +26,7 @@ use deltalake_core::protocol::DeltaOperation;
 use deltalake_core::protocol::SaveMode;
 use deltalake_core::{
     DeltaTable, DeltaTableError, ObjectStoreError,
-    kernel::{Action, Add, Schema},
+    kernel::{Action, Add},
     logstore::ObjectStoreRef,
     protocol::{ColumnCountStat, ColumnValueStat, Stats},
 };
@@ -33,7 +34,6 @@ use deltalake_core::{kernel::transaction::TableReference, parquet::format::FileM
 use log::{info, warn};
 use serde_json::{Number, Value};
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -348,10 +348,11 @@ impl DataWriter {
         let storage = table.object_store();
 
         // Initialize an arrow schema ref from the delta table schema
-        let metadata = table.metadata()?;
-        let arrow_schema = ArrowSchema::try_from(table.schema().unwrap())?;
+        let snapshot = table.snapshot()?;
+        let metadata = snapshot.metadata();
+        let arrow_schema: ArrowSchema = snapshot.schema().as_ref().try_into_arrow()?;
         let arrow_schema_ref = Arc::new(arrow_schema);
-        let partition_columns = metadata.partition_columns.clone();
+        let partition_columns = metadata.partition_columns().to_vec();
 
         // Initialize writer properties for the underlying arrow writer
         let writer_properties = WriterProperties::builder()
@@ -372,18 +373,18 @@ impl DataWriter {
     /// When schema is updated then `true` is returned which signals the caller that parquet
     /// created file or arrow batch should be revisited.
     pub fn update_schema(&mut self, table: &DeltaTable) -> Result<bool, Box<DataWriterError>> {
-        let metadata = table.metadata().unwrap();
-        let schema: ArrowSchema =
-            <ArrowSchema as TryFrom<&Schema>>::try_from(table.schema().unwrap())?;
+        let snapshot = table.snapshot()?;
+        let metadata = snapshot.metadata();
+        let schema: ArrowSchema = snapshot.schema().as_ref().try_into_arrow()?;
 
         let schema_updated = self.arrow_schema_ref.as_ref() != &schema
-            || self.partition_columns != metadata.partition_columns;
+            || self.partition_columns != *metadata.partition_columns();
 
         if schema_updated {
             let _ = std::mem::replace(&mut self.arrow_schema_ref, Arc::new(schema));
             let _ = std::mem::replace(
                 &mut self.partition_columns,
-                metadata.partition_columns.clone(),
+                metadata.partition_columns().to_vec(),
             );
         }
 
@@ -1073,7 +1074,6 @@ fn create_add(
         modification_time,
         data_change: true,
         stats: Some(stats_string),
-        stats_parsed: None,
         tags: None,
         ..Default::default()
     })

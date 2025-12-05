@@ -164,23 +164,18 @@ async fn main() -> anyhow::Result<()> {
                 decompress_gzip,
             };
 
-            tokio::spawn(async move {
-                let run = start_ingest(
-                    topic,
-                    table_location,
-                    options,
-                    std::sync::Arc::new(tokio_util::sync::CancellationToken::new()),
-                )
-                .await;
-                match &run {
-                    Ok(_) => info!("Ingest service exited gracefully"),
-                    Err(e) => error!("Ingest service exited with error {:?}", e),
-                }
-                run
-            })
-            .await
-            .unwrap()
-            .unwrap();
+            let run = start_ingest(
+                topic,
+                table_location,
+                options,
+                std::sync::Arc::new(tokio_util::sync::CancellationToken::new()),
+            )
+            .await;
+            match &run {
+                Ok(_) => info!("Ingest service exited gracefully"),
+                Err(e) => error!("Ingest service exited with error {:?}", e),
+            }
+            run?;
         }
         _ => unreachable!(),
     }

@@ -2,12 +2,15 @@ use crate::{DataTypeOffset, DataTypePartition};
 use deltalake_core::kernel::{Action, Add, Transaction};
 use deltalake_core::{DeltaTable, DeltaTableError};
 use std::collections::HashMap;
+use url::Url;
 
 pub(crate) async fn load_table(
     table_uri: &str,
     options: HashMap<String, String>,
 ) -> Result<DeltaTable, DeltaTableError> {
-    let mut table = deltalake_core::open_table_with_storage_options(table_uri, options).await?;
+    let url =
+        Url::parse(table_uri).map_err(|e| DeltaTableError::InvalidTableLocation(e.to_string()))?;
+    let mut table = deltalake_core::open_table_with_storage_options(url, options).await?;
     table.load().await?;
     Ok(table)
 }
@@ -47,7 +50,7 @@ pub(crate) async fn try_create_checkpoint(
         let table_version = table.version();
         // if there's new version right after current commit, then we need to reset
         // the table right back to version to create the checkpoint
-        let version_updated = table_version != version;
+        let version_updated = table_version != Some(version);
         if version_updated {
             table.load_version(version).await?;
         }
@@ -72,9 +75,14 @@ pub(crate) fn txn_app_id_for_partition(app_id: &str, partition: DataTypePartitio
 }
 
 /// Returns the last transaction version for the given transaction id recorded in the delta table.
-pub(crate) fn last_txn_version(table: &DeltaTable, txn_id: &str) -> Option<i64> {
-    table
-        .get_app_transaction_version()
-        .get(txn_id)
-        .map(|t| t.version)
+pub(crate) async fn last_txn_version(table: &DeltaTable, txn_id: &str) -> Option<i64> {
+    let snapshot = match table.snapshot() {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+    snapshot
+        .transaction_version(table.log_store().as_ref(), txn_id)
+        .await
+        .ok()
+        .flatten()
 }

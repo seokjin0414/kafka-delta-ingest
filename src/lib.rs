@@ -503,7 +503,9 @@ pub async fn start_ingest(
             let timer = Instant::now();
             match ingest_processor.complete_file(&partition_assignment).await {
                 Err(IngestError::ConflictingOffsets) | Err(IngestError::DeltaSchemaChanged) => {
-                    ingest_processor.reset_state(&mut partition_assignment)?;
+                    ingest_processor
+                        .reset_state(&mut partition_assignment)
+                        .await?;
                     continue;
                 }
                 Err(e) => {
@@ -653,7 +655,7 @@ async fn handle_rebalance(
                         Err(err.into())
                     } else {
                         partition_assignment.reset_with(partitions.as_slice());
-                        processor.reset_state(partition_assignment)?;
+                        processor.reset_state(partition_assignment).await?;
                         Err(IngestError::RebalanceInterrupt)
                     }
                 }
@@ -771,7 +773,7 @@ impl IngestProcessor {
         let dlq = dead_letter_queue_from_options(&opts).await?;
         let transformer = Transformer::from_transforms(&opts.transforms)?;
         let table = delta_helpers::load_table(table_uri, HashMap::new()).await?;
-        let coercion_tree = coercions::create_coercion_tree(table.schema().unwrap());
+        let coercion_tree = coercions::create_coercion_tree(table.snapshot()?.schema().as_ref());
         let delta_writer = DataWriter::for_table(&table, HashMap::new())?;
         let deserializer =
             match MessageDeserializerFactory::try_build(&opts.input_format, opts.decompress_gzip) {
@@ -956,14 +958,15 @@ impl IngestProcessor {
         }
 
         self.table.update().await?;
-        if !self.are_partition_offsets_match() {
+        if !self.are_partition_offsets_match().await {
             return Err(IngestError::ConflictingOffsets);
         }
 
         if self.delta_writer.update_schema(&self.table)? {
             info!("Table schema has been updated");
             // Update the coercion tree to reflect the new schema
-            let coercion_tree = coercions::create_coercion_tree(self.table.schema().unwrap());
+            let coercion_tree =
+                coercions::create_coercion_tree(self.table.snapshot()?.schema().as_ref());
             let _ = std::mem::replace(&mut self.coercion_tree, coercion_tree);
 
             return Err(IngestError::DeltaSchemaChanged);
@@ -1035,7 +1038,7 @@ impl IngestProcessor {
     }
 
     /// Resets all current state to the correct starting points represented by the current partition assignment.
-    fn reset_state(
+    async fn reset_state(
         &mut self,
         partition_assignment: &mut PartitionAssignment,
     ) -> Result<(), IngestError> {
@@ -1047,7 +1050,7 @@ impl IngestProcessor {
         // Update offsets stored in PartitionAssignment to the latest from the delta log
         for partition in partitions.iter() {
             let txn_app_id = txn_app_id_for_partition(self.opts.app_id.as_str(), *partition);
-            let version = last_txn_version(&self.table, &txn_app_id);
+            let version = last_txn_version(&self.table, &txn_app_id).await;
             partition_assignment.assignment.insert(*partition, version);
             self.delta_partition_offsets.insert(*partition, version);
         }
@@ -1165,13 +1168,14 @@ impl IngestProcessor {
     }
 
     /// Returns a boolean indicating whether the partition offsets currently held in memory match those stored in the delta log.
-    fn are_partition_offsets_match(&self) -> bool {
+    async fn are_partition_offsets_match(&self) -> bool {
         let mut result = true;
         for (partition, offset) in &self.delta_partition_offsets {
             let version = last_txn_version(
                 &self.table,
                 &txn_app_id_for_partition(self.opts.app_id.as_str(), *partition),
-            );
+            )
+            .await;
 
             if let Some(version) = version {
                 match offset {

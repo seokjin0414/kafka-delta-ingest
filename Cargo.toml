@@ -35,8 +35,8 @@ url = "2.5.7"
 dashmap = "6.1.0"
 
 # datafusion feature is required for writer version 2
-deltalake-core = { version = "0.26.0", features = ["json", "datafusion"]}
-deltalake-aws = { version = "0.9.0", optional = true }
+deltalake-core = { version = "0.29.4", features = ["json", "datafusion"]}
+deltalake-aws = { version = "0.12.1", optional = true }
 
 # s3 feature enabled, helps for locking interactions with DLQ
 dynamodb_lock = { version = "0.6.1", optional = true }
