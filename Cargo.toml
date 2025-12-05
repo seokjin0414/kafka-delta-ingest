@@ -53,9 +53,9 @@ s3 = [
 ]
 
 [dev-dependencies]
-rusoto_core = { version = "0.48.0", default-features = false, features = ["rustls"]}
+rusoto_core = { version = "0.48.0", default-features = false, features = ["native-tls"]}
 rusoto_credential = { version = "0.48.0"}
-rusoto_s3 = { version = "0.48.0", default-features = false, features = ["rustls"]}
+rusoto_s3 = { version = "0.48.0", default-features = false, features = ["native-tls"]}
 serial_test = "3.2.0"
 tempfile = "3.23.0"
 time = "0.3.44"
