@@ -1,5 +1,6 @@
 use crate::transforms::Transformer;
 use async_trait::async_trait;
+use base64::Engine;
 use chrono::prelude::*;
 use core::fmt::Debug;
 use deltalake_core::parquet::errors::ParquetError;
@@ -40,7 +41,7 @@ impl DeadLetter {
     pub(crate) fn from_failed_deserialization(bytes: &[u8], err: String) -> Self {
         let timestamp = Utc::now();
         Self {
-            base64_bytes: Some(base64::encode(bytes)),
+            base64_bytes: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
             json_string: None,
             error: Some(err),
             timestamp: timestamp

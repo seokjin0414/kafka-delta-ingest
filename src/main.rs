@@ -32,10 +32,10 @@
 
 use chrono::Local;
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
-use log::{error, info, LevelFilter};
+use log::{LevelFilter, error, info};
 use miridih_de_kafka_delta_ingest::{
-    start_ingest, AutoOffsetReset, DataTypeOffset, DataTypePartition, IngestOptions, MessageFormat,
-    SchemaSource,
+    AutoOffsetReset, DataTypeOffset, DataTypePartition, IngestOptions, MessageFormat, SchemaSource,
+    start_ingest,
 };
 use std::collections::HashMap;
 use std::io::prelude::*;
@@ -260,13 +260,17 @@ fn init_logger(app_id: String) {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("'{value}' - Each transform argument must be colon delimited and match the pattern 'PROPERTY: SOURCE'")]
+#[error(
+    "'{value}' - Each transform argument must be colon delimited and match the pattern 'PROPERTY: SOURCE'"
+)]
 struct TransformSyntaxError {
     value: String,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("'{value}' - Each Kafka setting must be delimited by an '=' and match the pattern 'PROPERTY_NAME=PROPERTY_VALUE'")]
+#[error(
+    "'{value}' - Each Kafka setting must be delimited by an '=' and match the pattern 'PROPERTY_NAME=PROPERTY_VALUE'"
+)]
 struct KafkaPropertySyntaxError {
     value: String,
 }
@@ -513,7 +517,7 @@ mod test {
     use miridih_de_kafka_delta_ingest::{MessageFormat, SchemaSource};
 
     use crate::{
-        build_app, convert_matches_to_message_format, parse_seek_offsets, SchemaSourceError,
+        SchemaSourceError, build_app, convert_matches_to_message_format, parse_seek_offsets,
     };
 
     const SCHEMA_REGISTRY_ADDRESS: &str = "http://localhost:8081";

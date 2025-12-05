@@ -16,14 +16,14 @@ use deltalake_core::parquet::{
     record::RowAccessor,
 };
 use deltalake_core::{DeltaTable, Path};
-use miridih_de_kafka_delta_ingest::{start_ingest, IngestOptions};
+use miridih_de_kafka_delta_ingest::{IngestOptions, start_ingest};
+use rdkafka::ClientConfig;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::DefaultClientContext;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::{DefaultRuntime, Timeout};
-use rdkafka::ClientConfig;
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
