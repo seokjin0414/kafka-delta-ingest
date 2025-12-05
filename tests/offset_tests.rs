@@ -128,7 +128,7 @@ async fn test_start_from_explicit() {
         helpers::send_json(&producer, &topic, &serde_json::to_value(m).unwrap()).await;
     }
 
-    producer.flush(Timeout::Never);
+    let _ = producer.flush(Timeout::Never);
 
     debug!("Sent test messages to Kafka");
 
@@ -259,7 +259,7 @@ async fn test_start_from_latest() {
         helpers::send_json(&producer, &topic, &serde_json::to_value(m).unwrap()).await;
     }
 
-    producer.flush(Timeout::Never);
+    let _ = producer.flush(Timeout::Never);
 
     // Start ingest
     let (kdi, token, rt) = helpers::create_kdi(

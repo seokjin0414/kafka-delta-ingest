@@ -371,6 +371,8 @@ async fn prepare_json_schema(topic: String) -> Result<RegisteredSchema, SRCError
             r#"{"schemaType": "JSON", "schema": "{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\"}, \"date\": {\"type\": \"string\"}, \"id\": {\"type\": \"number\"}}}"}"#,
         ),
         references: vec![],
+        properties: None,
+        tags: None,
     };
     post_schema(&settings, topic, schema).await
 }
@@ -382,6 +384,8 @@ async fn prepare_avro_schema(topic: String) -> Result<RegisteredSchema, SRCError
         schema_type: SchemaType::Avro,
         schema: String::from(DEFAULT_AVRO_SCHEMA),
         references: vec![],
+        properties: None,
+        tags: None,
     };
     post_schema(&settings, topic, schema).await
 }

@@ -1,11 +1,18 @@
 use std::collections::HashMap;
 use std::env;
+use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{BufReader, Cursor};
 use std::path::Path as FilePath;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Safe wrapper for env::set_var in test context.
+/// SAFETY: Tests are run sequentially with serial_test to avoid concurrent modification.
+pub fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
+    unsafe { env::set_var(key, value) }
+}
 
 use bytes::Buf;
 use chrono::prelude::*;
@@ -81,12 +88,14 @@ pub async fn send_json(producer: &FutureProducer, topic: &str, json: &Value) -> 
     let json = serde_json::to_string(json).unwrap();
 
     let record: FutureRecord<String, String> = FutureRecord::to(topic).payload(&json);
-    producer.send(record, Timeout::Never).await.unwrap()
+    let delivery = producer.send(record, Timeout::Never).await.unwrap();
+    (delivery.partition, delivery.offset)
 }
 
 pub async fn send_encoded(producer: &FutureProducer, topic: &str, content: Vec<u8>) -> (i32, i64) {
     let record: FutureRecord<String, Vec<u8>> = FutureRecord::to(topic).payload(&content);
-    producer.send(record, Timeout::Never).await.unwrap()
+    let delivery = producer.send(record, Timeout::Never).await.unwrap();
+    (delivery.partition, delivery.offset)
 }
 
 pub async fn send_kv_json(
@@ -98,7 +107,8 @@ pub async fn send_kv_json(
     let json = serde_json::to_string(json).unwrap();
 
     let record: FutureRecord<String, String> = FutureRecord::to(topic).payload(&json).key(&key);
-    producer.send(record, Timeout::Never).await.unwrap()
+    let delivery = producer.send(record, Timeout::Never).await.unwrap();
+    (delivery.partition, delivery.offset)
 }
 
 pub async fn send_bytes(producer: &FutureProducer, topic: &str, bytes: &Vec<u8>) {
@@ -268,15 +278,15 @@ pub fn create_kdi_with(
     let app_id = options.app_id.to_string();
     let worker_name = worker_name.unwrap_or(app_id.clone());
 
-    env::set_var("AWS_ENDPOINT_URL", test_aws_endpoint());
-    env::set_var("AWS_S3_LOCKING_PROVIDER", "dynamodb");
-    env::set_var("AWS_REGION", "us-east-2");
-    env::set_var("DYNAMO_LOCK_TABLE_NAME", "locks");
-    env::set_var("DYNAMO_LOCK_OWNER_NAME", Uuid::new_v4().to_string());
-    env::set_var("DYNAMO_LOCK_PARTITION_KEY_VALUE", app_id.clone());
-    env::set_var("DYNAMO_LOCK_REFRESH_PERIOD_MILLIS", "100");
-    env::set_var("DYNAMO_LOCK_ADDITIONAL_TIME_TO_WAIT_MILLIS", "100");
-    env::set_var("DYNAMO_LOCK_LEASE_DURATION", "2");
+    set_var("AWS_ENDPOINT_URL", test_aws_endpoint());
+    set_var("AWS_S3_LOCKING_PROVIDER", "dynamodb");
+    set_var("AWS_REGION", "us-east-2");
+    set_var("DYNAMO_LOCK_TABLE_NAME", "locks");
+    set_var("DYNAMO_LOCK_OWNER_NAME", Uuid::new_v4().to_string());
+    set_var("DYNAMO_LOCK_PARTITION_KEY_VALUE", app_id.clone());
+    set_var("DYNAMO_LOCK_REFRESH_PERIOD_MILLIS", "100");
+    set_var("DYNAMO_LOCK_ADDITIONAL_TIME_TO_WAIT_MILLIS", "100");
+    set_var("DYNAMO_LOCK_LEASE_DURATION", "2");
 
     let rt = create_runtime(&worker_name);
     let token = Arc::new(CancellationToken::new());
@@ -317,7 +327,7 @@ pub fn create_runtime(name: &str) -> Runtime {
 pub fn init_logger() {
     // Any time the test_aws_endpoint() is being used the ability to hit HTTP hosts
     // needs to be enabled
-    env::set_var("AWS_ALLOW_HTTP", "true");
+    set_var("AWS_ALLOW_HTTP", "true");
 
     let _ = env_logger::Builder::new()
         .format(|buf, record| {
